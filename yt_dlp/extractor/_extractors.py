@@ -1211,6 +1211,7 @@ from .nfl import (
     NFLPlusReplayIE,
 )
 from .nhk import (
+    NhkEduSchoolWatchIE,
     NhkForSchoolBangumiIE,
     NhkForSchoolProgramListIE,
     NhkForSchoolSubjectIE,
