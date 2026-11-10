@@ -168,7 +168,12 @@ class RadikoBaseIE(InfoExtractor):
 
 
 class RadikoIE(RadikoBaseIE):
-    _VALID_URL = r'https?://(?:www\.)?radiko\.jp/#!/ts/(?P<station>[A-Z0-9-]+)/(?P<timestring>\d+)'
+    _VALID_URL = [
+        r'https?://(?:www\.)?radiko\.jp/#!/ts/(?P<station>[A-Z0-9-]+)/(?P<timestring>\d+)',
+        r'''(?x)https?://(?:www\.)?radiko\.jp/share/?\?
+            (?=(?:[^#]*&)?sid=(?P<station>[A-Z0-9-]+))
+            (?=(?:[^#]*&)?t=(?P<timestring>\d+))''',
+    ]
 
     _TESTS = [{
         # QRR (文化放送) station provides <desc>
@@ -180,6 +185,12 @@ class RadikoIE(RadikoBaseIE):
         'only_matching': True,
     }, {
         'url': 'https://radiko.jp/#!/ts/JOAK-FM/20210509090000',
+        'only_matching': True,
+    }, {
+        'url': 'https://radiko.jp/share/?sid=FMAICHI&t=20261108140000',
+        'only_matching': True,
+    }, {
+        'url': 'https://radiko.jp/share/?t=20261108140000&sid=FMAICHI&noreload=1',
         'only_matching': True,
     }]
 
