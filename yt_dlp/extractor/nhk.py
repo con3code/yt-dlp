@@ -1,3 +1,4 @@
+import json
 import re
 
 from .common import InfoExtractor
@@ -5,6 +6,7 @@ from ..utils import (
     ExtractorError,
     clean_html,
     filter_dict,
+    float_or_none,
     get_element_by_class,
     int_or_none,
     join_nonempty,
@@ -355,24 +357,11 @@ class NhkVodProgramIE(NhkBaseIE):
 
 
 class NhkForSchoolBangumiIE(InfoExtractor):
-    _VALID_URL = r'https?://www2\.nhk\.or\.jp/school/movie/(?P<type>bangumi|clip)\.cgi\?das_id=(?P<id>[a-zA-Z0-9_-]+)'
+    # bangumi.cgi URLs are handled by NhkEduSchoolWatchIE
+    _VALID_URL = r'https?://www2\.nhk\.or\.jp/school/movie/(?P<type>clip)\.cgi\?das_id=(?P<id>[a-zA-Z0-9_-]+)'
     _TESTS = [{
-        'url': 'https://www2.nhk.or.jp/school/movie/bangumi.cgi?das_id=D0005150191_00000',
-        'info_dict': {
-            'id': 'D0005150191_00003',
-            'title': 'にている かな',
-            'duration': 599.999,
-            'timestamp': 1396414800,
-
-            'upload_date': '20140402',
-            'ext': 'mp4',
-
-            'chapters': 'count:12',
-        },
-        'params': {
-            # m3u8 download
-            'skip_download': True,
-        },
+        'url': 'https://www2.nhk.or.jp/school/movie/clip.cgi?das_id=D0005400226_00000',
+        'only_matching': True,
     }]
 
     def _real_extract(self, url):
@@ -417,6 +406,118 @@ class NhkForSchoolBangumiIE(InfoExtractor):
             'timestamp': unified_timestamp(base_values['r_upload']),
             'formats': formats,
             'chapters': chapters,
+        }
+
+
+class NhkEduSchoolWatchIE(InfoExtractor):
+    IE_NAME = 'nhk:edu:school'
+    IE_DESC = 'NHK for School'
+    _VALID_URL = [
+        r'https?://edu\.web\.nhk/school/watch/bangumi/?\?(?:[^#]*&)?das_id=(?P<id>[\w-]+)',
+        r'https?://(?:www2\.nhk\.or\.jp|edu\.web\.nhk)/school/movie/bangumi\.cgi\?(?:[^#]*&)?das_id=(?P<id>[\w-]+)',
+    ]
+    _TESTS = [{
+        'url': 'https://edu.web.nhk/school/watch/bangumi/?das_id=D0005180400_00000',
+        'info_dict': {
+            'id': 'D0005180400_00000',
+            'ext': 'mp4',
+            'title': 'PR動画の作り方',
+            'series': 'アクティブ１０　プロのプロセス',
+            'description': 'md5:da4f7a37a597d53797513673ef574b5d',
+            'duration': 600,
+            'timestamp': 1574989200,
+            'upload_date': '20191129',
+            'thumbnail': r're:https?://.+\.jpg',
+            'tags': 'count:5',
+            'chapters': 'count:10',
+        },
+        'params': {'skip_download': 'm3u8'},
+    }, {
+        'url': 'https://www2.nhk.or.jp/school/movie/bangumi.cgi?das_id=D0005150191_00000',
+        'info_dict': {
+            'id': 'D0005150191_00000',
+            'ext': 'mp4',
+            'title': 'にている かな',
+            'series': str,
+            'description': str,
+            'duration': 599.999,
+            'timestamp': int,
+            'upload_date': str,
+            'thumbnail': r're:https?://.+\.jpg',
+            'tags': list,
+            'chapters': 'count:12',
+        },
+        'params': {'skip_download': 'm3u8'},
+    }]
+    _BASE_URL = 'https://edu.web.nhk'
+    _API_FIELDS = (
+        'dasId', 'version', 'title', 'noaTitle', 'noaSubtitle', 'noaDescription', 'thumbnailPath',
+        'thumbnails', 'topKeywords', 'encodings', 'datePublished', 'partOfSeries', 'hasParts', 'isProgram')
+    # Default value the site itself sets for anonymous household viewers (Tokyo area)
+    _CONSENT = {
+        'status': 'optedin',
+        'entity': 'household',
+        'area': {'areaId': '130', 'jisx0402': '13101', 'postal': '1000001', 'pref': '13'},
+    }
+
+    def _get_access_token(self, video_id, watch_url):
+        if token := try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value):
+            return token
+        self._set_cookie(
+            'edu.web.nhk', 'consentToUse', json.dumps(self._CONSENT, separators=(',', ':')))
+        self._request_webpage(
+            f'{self._BASE_URL}/tix/build_authorize', video_id, 'Obtaining anonymous access token',
+            query={'idp': 'r-alaz', 'profileType': 'anonymous', 'redirect_uri': watch_url})
+        token = try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value)
+        if not token:
+            raise ExtractorError('Unable to obtain access token')
+        return token
+
+    def _real_extract(self, url):
+        video_id = self._match_id(url)
+        watch_url = f'{self._BASE_URL}/school/watch/bangumi/?das_id={video_id}'
+        headers = {'Authorization': f'Bearer {self._get_access_token(video_id, watch_url)}'}
+
+        meta = self._download_json(
+            'https://noaapi.web.nhk/r1/movies/', video_id, headers=headers,
+            query={'dasId': video_id, '_source': ','.join(self._API_FIELDS)})
+        meta = traverse_obj(meta, ('result', 0, {dict}))
+        if not meta:
+            raise ExtractorError('Video not found', expected=True)
+
+        encoding = traverse_obj(meta, ('encodings', ..., {dict}, filter, any)) or {}
+        content_path = encoding.get('contentPath')
+        if not content_path:
+            raise ExtractorError('No video available', expected=True)
+
+        media_token = self._download_json(
+            'https://mediatoken.web.nhk/v1/token', video_id,
+            'Downloading media token', headers=headers)['token']
+        m3u8_path = re.sub(r'\.(?:f4v|m4a|mp4)$', '', content_path) + '/index.m3u8'
+        formats = self._extract_m3u8_formats(
+            f'https://media.vd.st.nhk{m3u8_path}', video_id, 'mp4',
+            m3u8_id='hls', query={'hdnts': media_token})
+
+        chapters = [traverse_obj(part, {
+            'title': ('name', {str}),
+            'start_time': ('startOffset', {float_or_none}),
+            'end_time': ('endOffset', {float_or_none}),
+        }) for _, part in sorted(traverse_obj(meta, ('hasParts', {dict.items})) or [])]
+
+        return {
+            'id': meta.get('dasId') or video_id,
+            'formats': formats,
+            'chapters': chapters or None,
+            'duration': parse_duration(encoding.get('duration')),
+            'webpage_url': watch_url,
+            **traverse_obj(meta, {
+                'title': (('title', 'noaTitle'), {str}, filter, any),
+                'description': ('noaDescription', {clean_html}),
+                'series': (('noaSubtitle', ('partOfSeries', 'name')), {str}, filter, any),
+                'timestamp': ('datePublished', {unified_timestamp}),
+                'thumbnail': ('thumbnailPath', {urljoin(self._BASE_URL)}),
+                'tags': ('topKeywords', ..., {str}),
+            }),
         }
 
 
