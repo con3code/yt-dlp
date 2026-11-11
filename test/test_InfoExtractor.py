@@ -342,6 +342,41 @@ class TestInfoExtractor(unittest.TestCase):
                 },
                 {},
             ),
+            (
+                # JSON-LD value objects with @language (news.web.nhk)
+                r'''
+<script type="application/ld+json">
+{
+"@context": "http://schema.org",
+"@type": "NewsArticle",
+"headline": {"@value": "“年内入試”での生成AI活用めぐり大学の対応分かれる", "@language": "ja"},
+"description": {"@value": "大学側の対応も分かれています", "@language": "ja"},
+"datePublished": "2026-11-11T08:18:00+09:00"
+}</script>''',
+                {
+                    'title': '“年内入試”での生成AI活用めぐり大学の対応分かれる',
+                    'description': '大学側の対応も分かれています',
+                    'timestamp': 1794352680,
+                },
+                {},
+            ),
+            (
+                # JSON-LD value objects in a VideoObject, including one with @type
+                r'''
+<script type="application/ld+json">
+{
+"@context": "https://schema.org",
+"@type": "VideoObject",
+"name": {"@value": "video title", "@language": "en"},
+"keywords": [{"@value": "a", "@language": "en"}, {"@value": "b", "@language": "en"}],
+"contentUrl": {"@value": "https://example.com/video.mp4", "@type": "URL"}
+}</script>''',
+                {
+                    'title': 'video title',
+                    'url': 'https://example.com/video.mp4',
+                },
+                {},
+            ),
         ]
         for html, expected_dict, search_json_ld_kwargs in _TESTS:
             expect_dict(

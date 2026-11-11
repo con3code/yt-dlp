@@ -1608,6 +1608,20 @@ class InfoExtractor:
             return {}
         info = {}
 
+        def unwrap_value_objects(obj):
+            # JSON-LD allows a value to be written as a "value object", e.g.
+            # {"@value": "title", "@language": "ja"}; replace these with the bare value
+            # https://www.w3.org/TR/json-ld11/#value-objects
+            if isinstance(obj, list):
+                return [unwrap_value_objects(x) for x in obj]
+            if not isinstance(obj, dict):
+                return obj
+            if '@value' in obj and obj.keys() <= {'@value', '@language', '@type', '@direction', '@index'}:
+                return obj['@value']
+            return {k: unwrap_value_objects(v) for k, v in obj.items()}
+
+        json_ld = unwrap_value_objects(json_ld)
+
         INTERACTION_TYPE_MAP = {
             'CommentAction': 'comment',
             'AgreeAction': 'like',
