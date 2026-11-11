@@ -19,6 +19,7 @@ from ..utils import (
     get_element_by_attribute,
     int_or_none,
     join_nonempty,
+    parse_qs,
     str_or_none,
     traverse_obj,
     url_or_none,
@@ -181,7 +182,7 @@ class InstagramBaseIE(InfoExtractor):
             )))),
         }
 
-    def _extract_product(self, product_info, video_id=None, get_comments=True):
+    def _extract_product(self, product_info, video_id=None, get_comments=True, img_index=None):
         if isinstance(product_info, list):
             product_info = product_info[0]
 
@@ -206,6 +207,21 @@ class InstagramBaseIE(InfoExtractor):
         }
 
         if carousel_media := traverse_obj(product_info, ('carousel_media', ..., {dict})):
+            if img_index is not None:
+                # img_index= in the post URL picks one item, counting photos too (1-based)
+                if not 1 <= img_index <= len(carousel_media):
+                    raise ExtractorError(
+                        f'Item {img_index} does not exist; this post has {len(carousel_media)} items',
+                        expected=True)
+                media = carousel_media[img_index - 1]
+                if not (media.get('video_versions') or media.get('video_dash_manifest')):
+                    raise ExtractorError(f'Item {img_index} of this post is a photo, not a video', expected=True)
+                return {
+                    **info_dict,
+                    **self._extract_product_media(media),
+                    '__post_extractor': self.extract_comments(info_dict.get('id')) if get_comments else None,
+                }
+
             # Posts can mix photos and videos; photos have no formats, so skip them
             # instead of failing with "No video formats found" for each one
             video_media = [m for m in carousel_media if m.get('video_versions') or m.get('video_dash_manifest')]
@@ -289,6 +305,10 @@ class InstagramIE(InstagramBaseIE):
     _VALID_URL = r'(?P<url>https?://(?:www\.)?instagram\.com(?:/(?!share/)[^/?#]+)?/(?:p|tv|reels?(?!/audio/))/(?P<id>[^/?#&]+))'
     _EMBED_REGEX = [r'<iframe[^>]+src=(["\'])(?P<url>(?:https?:)?//(?:www\.)?instagram\.com/p/[^/]+/embed.*?)\1']
     _TESTS = [{
+        # img_index= picks one item of a post with photos and videos (counting photos)
+        'url': 'https://www.instagram.com/p/Dfj1Nzpkz6h/?img_index=2&mdxt=bmhlM3VwamtpZW5r',
+        'only_matching': True,
+    }, {
         'url': 'https://instagram.com/p/aye83DjauH/?foo=bar#abc',
         'md5': '0d2da106a9d2631273e192b372806516',
         'info_dict': {
@@ -444,6 +464,7 @@ class InstagramIE(InstagramBaseIE):
                 or self._search_regex(r'\["LSD",\[\],\{"token":"([^"]+)"', webpage, 'LSD token'))
 
     def _real_extract(self, url):
+        img_index = int_or_none(traverse_obj(parse_qs(url), ('img_index', -1)))
         video_id, url = self._match_valid_url(url).group('id', 'url')
         media_id = str(_id_to_pk(video_id))
 
@@ -453,7 +474,7 @@ class InstagramIE(InstagramBaseIE):
                     f'{self._API_BASE_URL}/media/{media_id}/info/', video_id,
                     'Downloading video info', 'Video info extraction failed',
                     impersonate=self._can_impersonate and self._is_web_app,
-                    headers=self._api_headers)['items'][0])
+                    headers=self._api_headers)['items'][0], img_index=img_index)
             except ExtractorError as e:
                 if not (isinstance(e.cause, HTTPError) and self._is_login_redirect(e.cause.response.url)):
                     raise
@@ -535,7 +556,8 @@ class InstagramIE(InstagramBaseIE):
                 'Otherwise, if the post is accessible in browser without being logged-in'
                 f'{bug_reports_message(before=",")}', expected=True)
 
-        info_dict = self._extract_product(product_info, video_id=video_id, get_comments=False)
+        info_dict = self._extract_product(
+            product_info, video_id=video_id, get_comments=False, img_index=img_index)
         is_playlist = info_dict.get('_type') == 'playlist'
         if not is_playlist and not info_dict.get('formats'):
             self.raise_no_formats('There is no video in this post', expected=True)
