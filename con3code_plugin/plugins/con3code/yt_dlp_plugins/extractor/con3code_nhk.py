@@ -4,13 +4,55 @@
 
 import json
 import re
+import urllib.parse
 from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import ExtractorError, clean_html, filter_dict, float_or_none, get_element_by_class, int_or_none, join_nonempty, make_archive_id, orderedSet, parse_duration, remove_end, traverse_obj, try_call, unescapeHTML, unified_timestamp, url_or_none, urljoin, variadic
 
-__all__ = ['NhkEduSchoolWatchIE']
+__all__ = ['NhkEduSchoolWatchIE', 'NhkNewsWebIE']
 
 
-class NhkEduSchoolWatchIE(InfoExtractor):
+class NhkWebBaseIE(InfoExtractor):
+    """Anonymous NHK ONE (*.web.nhk) access token and media token"""
+    _BASE_URL = None
+    # Default value the site itself sets for anonymous household viewers (Tokyo area)
+    _CONSENT = {
+        'status': 'optedin',
+        'entity': 'household',
+        'area': {'areaId': '130', 'jisx0402': '13101', 'postal': '1000001', 'pref': '13'},
+    }
+
+    def _get_access_token(self, video_id, watch_url):
+        if token := try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value):
+            return token
+        self._set_cookie(
+            urllib.parse.urlparse(self._BASE_URL).hostname, 'consentToUse',
+            json.dumps(self._CONSENT, separators=(',', ':')))
+        self._request_webpage(
+            f'{self._BASE_URL}/tix/build_authorize', video_id, 'Obtaining anonymous access token',
+            query={'idp': 'r-alaz', 'profileType': 'anonymous', 'redirect_uri': watch_url})
+        token = try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value)
+        if not token:
+            raise ExtractorError('Unable to obtain access token')
+        return token
+
+    def _get_media_token(self, video_id, headers):
+        return self._download_json(
+            'https://mediatoken.web.nhk/v1/token', video_id,
+            'Downloading media token', headers=headers)['token']
+
+    def _extract_media_formats(self, m3u8_url, video_id, media_token):
+        formats = self._extract_m3u8_formats(
+            m3u8_url, video_id, 'mp4', m3u8_id='hls', query={'hdnts': media_token})
+        for f in formats:
+            # For when ffmpeg downloads (AES-128 without pycryptodomex, or --download-sections):
+            # the audio parameters are found late, so ffmpeg drops the audio with the default
+            # probe time; and the last audio packet is truncated, which makes the mp4 muxer fail
+            f.setdefault('downloader_options', {})['ffmpeg_args'] = [
+                '-analyzeduration', '10000000', '-fflags', '+discardcorrupt']
+        return formats
+
+
+class NhkEduSchoolWatchIE(NhkWebBaseIE):
     IE_NAME = 'nhk:edu:school'
     IE_DESC = 'NHK for School'
     _VALID_URL = [
@@ -54,25 +96,6 @@ class NhkEduSchoolWatchIE(InfoExtractor):
     _API_FIELDS = (
         'dasId', 'version', 'title', 'noaTitle', 'noaSubtitle', 'noaDescription', 'thumbnailPath',
         'thumbnails', 'topKeywords', 'encodings', 'datePublished', 'partOfSeries', 'hasParts', 'isProgram')
-    # Default value the site itself sets for anonymous household viewers (Tokyo area)
-    _CONSENT = {
-        'status': 'optedin',
-        'entity': 'household',
-        'area': {'areaId': '130', 'jisx0402': '13101', 'postal': '1000001', 'pref': '13'},
-    }
-
-    def _get_access_token(self, video_id, watch_url):
-        if token := try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value):
-            return token
-        self._set_cookie(
-            'edu.web.nhk', 'consentToUse', json.dumps(self._CONSENT, separators=(',', ':')))
-        self._request_webpage(
-            f'{self._BASE_URL}/tix/build_authorize', video_id, 'Obtaining anonymous access token',
-            query={'idp': 'r-alaz', 'profileType': 'anonymous', 'redirect_uri': watch_url})
-        token = try_call(lambda: self._get_cookies(self._BASE_URL)['z_at'].value)
-        if not token:
-            raise ExtractorError('Unable to obtain access token')
-        return token
 
     def _real_extract(self, url):
         video_id = self._match_id(url)
@@ -91,13 +114,10 @@ class NhkEduSchoolWatchIE(InfoExtractor):
         if not content_path:
             raise ExtractorError('No video available', expected=True)
 
-        media_token = self._download_json(
-            'https://mediatoken.web.nhk/v1/token', video_id,
-            'Downloading media token', headers=headers)['token']
+        media_token = self._get_media_token(video_id, headers)
         m3u8_path = re.sub(r'\.(?:f4v|m4a|mp4)$', '', content_path) + '/index.m3u8'
-        formats = self._extract_m3u8_formats(
-            f'https://media.vd.st.nhk{m3u8_path}', video_id, 'mp4',
-            m3u8_id='hls', query={'hdnts': media_token})
+        formats = self._extract_media_formats(
+            f'https://media.vd.st.nhk{m3u8_path}', video_id, media_token)
 
         chapters = [traverse_obj(part, {
             'title': ('name', {str}),
@@ -120,3 +140,79 @@ class NhkEduSchoolWatchIE(InfoExtractor):
                 'tags': ('topKeywords', ..., {str}),
             }),
         }
+
+
+class NhkNewsWebIE(NhkWebBaseIE):
+    IE_NAME = 'nhk:news'
+    IE_DESC = 'NHK ONE ニュース'
+    _VALID_URL = r'https?://news\.web\.nhk/newsweb/(?:[\w-]+/)*na/(?P<id>n[a-z]-\w+)'
+    _TESTS = [{
+        'url': 'https://news.web.nhk/newsweb/na/nd-20261111de73858',
+        'info_dict': {
+            'id': 'nd-20261111de73858',
+            'ext': 'mp4',
+            'title': '“年内入試”での生成AI活用めぐり大学の対応分かれる',
+            'description': 'md5:0f624ecf09ba2eafac30c3d71f733244',
+            'duration': 441,
+            'timestamp': 1794352680,
+            'upload_date': '20261110',
+            'thumbnail': r're:https://imgu\.web\.nhk/.+\.jpg',
+            'genres': ['社会'],
+            'tags': ['ＡＩ・ネット・ＩＴ', '教育'],
+        },
+        'params': {'skip_download': 'm3u8'},
+        'skip': 'News articles are removed after a while',
+    }]
+    _BASE_URL = 'https://news.web.nhk'
+
+    def _real_extract(self, url):
+        article_id = self._match_id(url)
+        watch_url = f'{self._BASE_URL}/newsweb/na/{article_id}'
+        headers = {'Authorization': f'Bearer {self._get_access_token(article_id, watch_url)}'}
+
+        # The page HTML only has a summary; the player loads the article from this API
+        article = self._download_json(
+            f'https://api.web.nhk/r8/t/newsarticle/na/{article_id}.json', article_id,
+            'Downloading article JSON', headers=headers)
+        videos = traverse_obj(article, ('video', lambda _, v: v['detailedContent']))
+        if not videos:
+            raise ExtractorError('This article has no video', expected=True)
+
+        common_info = traverse_obj(article, {
+            'timestamp': ('datePublished', {unified_timestamp}),
+            'genres': ('genre', ..., {str}, filter, all, filter),
+            'tags': ('topic', ..., 'name', {str}, filter, all, filter),
+        })
+        media_token = self._get_media_token(article_id, headers)
+
+        entries = []
+        for video in videos:
+            m3u8_url = traverse_obj(video, (
+                'detailedContent', lambda _, v: v['name'] == 'hls', 'contentUrl', {url_or_none}, any))
+            if not m3u8_url:
+                continue
+            video_id = self._search_regex(
+                r'/([\w-]+)/index\.m3u8', m3u8_url, 'video id', default=article_id)
+            entries.append({
+                'id': video_id,
+                'formats': self._extract_media_formats(m3u8_url, video_id, media_token),
+                **common_info,
+                **traverse_obj(video, {
+                    'title': ('name', {str}, {str.strip}, filter),
+                    'description': ('description', {clean_html}, filter),
+                    'duration': ('duration', {parse_duration}),
+                    'thumbnail': ('thumbnailUrl', {url_or_none}),
+                }),
+            })
+        if not entries:
+            raise ExtractorError('No playable video found', expected=True)
+
+        if len(entries) == 1:
+            return {
+                **entries[0],
+                'id': article_id,
+                'webpage_url': watch_url,
+            }
+        return self.playlist_result(
+            entries, article_id, traverse_obj(article, ('headline', {str}, {str.strip})),
+            traverse_obj(article, ('description', {clean_html})))
