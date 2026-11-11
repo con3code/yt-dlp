@@ -9,6 +9,7 @@ from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.compat import compat_etree_fromstring
 from yt_dlp.networking.exceptions import HTTPError
 from yt_dlp.utils import ExtractorError, clean_html, determine_ext, float_or_none, format_field, get_element_by_id, get_first, int_or_none, join_nonempty, js_to_json, merge_dicts, parse_count, parse_qs, qualities, str_or_none, traverse_obj, try_get, url_or_none, urlencode_postdata, urljoin, variadic
+from yt_dlp.utils.networking import std_headers
 
 import yt_dlp.extractor.facebook as _upstream
 from yt_dlp.extractor.facebook import FacebookReelIE
@@ -21,7 +22,17 @@ class FacebookIE(_upstream.FacebookIE, plugin_name='con3code'):
     def _is_login_wall(webpage):
         # Signed-out visitors get a page shell without video data and with a login form
         return '"USER_ID":"0"' in webpage and any(p in webpage for p in (
-            'LoginCometHeaderLoginForm', 'LoginDialog.react', 'login_popup'))
+            'LoginCometHeaderLoginForm', 'LoginDialog.react', 'login_popup',
+            # the mobile site's login page
+            'm_login_email', 'caa_login_form'))
+
+    def _page_headers(self):
+        # Phone User-Agents get the mobile site, whose pages have no video data
+        # (it is loaded by script later), so ask for the desktop site instead
+        user_agent = traverse_obj(self.get_param('http_headers'), 'User-Agent') or ''
+        if re.search(r'\b(?:Mobile|iPhone|iPod|Android)\b', user_agent):
+            return {'User-Agent': std_headers['User-Agent']}
+        return {}
 
     def _raise_login_wall(self):
         if self._get_cookies('https://www.facebook.com/').get('c_user'):
@@ -32,7 +43,8 @@ class FacebookIE(_upstream.FacebookIE, plugin_name='con3code'):
 
     def _extract_from_url(self, url, video_id):
         webpage = self._download_webpage(
-            url.replace('://m.facebook.com/', '://www.facebook.com/'), video_id)
+            url.replace('://m.facebook.com/', '://www.facebook.com/'), video_id,
+            headers=self._page_headers())
 
         def extract_metadata(webpage):
             post_data = [self._parse_json(j, video_id, fatal=False) for j in re.findall(
@@ -387,6 +399,7 @@ class FacebookIE(_upstream.FacebookIE, plugin_name='con3code'):
                         webpage, 'dtsg token', default=''),
                 }),
                 headers={
+                    **self._page_headers(),
                     'Content-Type': 'application/x-www-form-urlencoded',
                 })
             tahoe_js_data = self._parse_json(
@@ -462,7 +475,8 @@ class FacebookShareIE(InfoExtractor):
 
     def _real_extract(self, url):
         share_id = self._match_id(url)
-        webpage, urlh = self._download_webpage_handle(url, share_id, 'Resolving share link')
+        webpage, urlh = self._download_webpage_handle(
+            url, share_id, 'Resolving share link', headers=FacebookIE._page_headers(self))
         # Share links redirect to the reel or video page; otherwise the page may name it
         for target in (urlh.url, self._og_search_url(webpage, default=None),
                        self._html_search_regex(

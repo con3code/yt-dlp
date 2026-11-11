@@ -205,7 +205,7 @@ def gen_facebook():
     src = Source('facebook')
     # _extract_from_url is copied for the reel caption and the signed-out page check;
     # FacebookReelIE hands reels to FacebookIE, so it picks up this override
-    methods = [src.method('FacebookIE', name) for name in ('_is_login_wall', '_raise_login_wall', '_extract_from_url')]
+    methods = [src.method('FacebookIE', name) for name in ('_is_login_wall', '_page_headers', '_raise_login_wall', '_extract_from_url')]
     helpers = ['FacebookReelIE', *src.module_names_used('\n'.join(methods))]
     return f'''{header(src)}
 {src.imports()}
