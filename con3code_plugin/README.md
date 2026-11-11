@@ -13,7 +13,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 `yt-dlp -v` lists the loaded plugins:
 
 ```
-[debug] Extractor Plugins: NhkEduSchoolWatchIE, NhkNewsWebIE, RadikoShareIE, ThreadsIE, ThreadsShareIE, con3code (InstagramIE), con3code (RadikoIE), con3code (RadikoRadioIE)
+[debug] Extractor Plugins: FacebookShareIE, NhkEduSchoolWatchIE, NhkNewsWebIE, RadikoShareIE, ThreadsIE, ThreadsShareIE, con3code (FacebookIE), con3code (InstagramIE), con3code (RadikoIE), con3code (RadikoRadioIE)
 ```
 
 ## What it contains
@@ -24,6 +24,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 | NHK ONE news articles with video (`news.web.nhk/newsweb/na/...`) | new extractor `NhkNewsWebIE` |
 | Instagram: skip photos in posts that mix photos and videos; `img_index=` picks one item | override of `InstagramIE` |
 | Threads posts (`threads.com/@user/post/...`) and share links (`threads.com/share/...`) | new extractors `ThreadsIE`, `ThreadsShareIE` |
+| Facebook reels: caption/date, and a sign-in error (`--cookies`) for the signed-out page; share links (`facebook.com/share/r/...`, `/share/v/...`) | `FacebookIE` override, new extractor `FacebookShareIE` |
 | radiko premium (area-free) login, `--cookies` and `--username/--password` | overrides of `RadikoIE` and `RadikoRadioIE` |
 | radiko share links (`radiko.jp/share/?sid=&t=`) | new extractor `RadikoShareIE`, hands the URL to `RadikoIE` |
 
@@ -32,7 +33,7 @@ extractors, where an override cannot change which URLs an extractor matches.
 
 ## Regenerate after changing the fork
 
-The fork's `yt_dlp/extractor/radiko.py`, `nhk.py`, `instagram.py` and `threads.py` are the only source.
+The fork's `yt_dlp/extractor/radiko.py`, `nhk.py`, `instagram.py`, `threads.py` and `facebook.py` are the only source.
 Do not edit the files under `plugins/` by hand.
 
 ```shell

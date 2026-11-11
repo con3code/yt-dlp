@@ -483,6 +483,10 @@ class FacebookIE(InfoExtractor):
                 r'(?s)<span class="fbPhotosPhotoCaption".*?id="fbPhotoPageCaption"><span class="hasCaption">(?P<content>.*?)</span>',
                 self._meta_regex('og:title'), self._meta_regex('twitter:title'), r'<title>(?P<content>.+?)</title>',
             ), webpage, 'title', default=None, group='content')
+            # Reel pages keep the caption in the story whose attachment is this video
+            stories = [p for p in post if video_id in traverse_obj(
+                p, ('attachments', ..., 'media', 'id', {str_or_none}))]
+            description = description or traverse_obj(stories, (..., 'message', 'text', {str}, any))
             description = description or self._html_search_meta(
                 ['description', 'og:description', 'twitter:description'],
                 webpage, 'description', default=None)
@@ -499,7 +503,7 @@ class FacebookIE(InfoExtractor):
                     (r'ownerName\s*:\s*"([^"]+)"', *self._og_regexes('title')), webpage, 'uploader', fatal=False))
             timestamp = int_or_none(self._search_regex(
                 r'<abbr[^>]+data-utime=["\'](\d+)', webpage,
-                'timestamp', default=None))
+                'timestamp', default=None)) or traverse_obj(stories, (..., 'creation_time', {int_or_none}, any))
             thumbnail = self._html_search_meta(
                 ['og:image', 'twitter:image'], webpage, 'thumbnail', default=None)
             # some webpages contain unretrievable thumbnail urls
@@ -526,7 +530,8 @@ class FacebookIE(InfoExtractor):
             }
 
             info_json_ld = self._search_json_ld(webpage, video_id, default={})
-            info_json_ld['title'] = (re.sub(r'\s*\|\s*Facebook$', '', title or info_json_ld.get('title') or page_title or '')
+            # A bare "Facebook" (e.g. the <title> of reel pages) is not a title
+            info_json_ld['title'] = (re.sub(r'^Facebook$|\s*\|\s*Facebook$', '', title or info_json_ld.get('title') or page_title or '')
                                      or (description or '').replace('\n', ' ') or f'Facebook video #{video_id}')
             return merge_dicts(info_json_ld, info_dict)
 
@@ -760,6 +765,8 @@ class FacebookIE(InfoExtractor):
                     'id="login_form"',
                     'id="loginbutton"')):
                 self.raise_login_required()
+            elif self._is_login_wall(webpage):
+                self._raise_login_wall()
 
         if not video_data and '/watchparty/' in url:
             post_data = {
@@ -876,6 +883,19 @@ class FacebookIE(InfoExtractor):
 
         return info_dict
 
+    @staticmethod
+    def _is_login_wall(webpage):
+        # Signed-out visitors get a page shell without video data and with a login form
+        return '"USER_ID":"0"' in webpage and any(p in webpage for p in (
+            'LoginCometHeaderLoginForm', 'LoginDialog.react', 'login_popup'))
+
+    def _raise_login_wall(self):
+        if self._get_cookies('https://www.facebook.com/').get('c_user'):
+            self.raise_login_required(
+                'Facebook showed the signed-out page even though cookies were given; '
+                'the cookies may have expired or may not apply to www.facebook.com', method='cookies')
+        self.raise_login_required('This video is only available to signed-in users', method='cookies')
+
     def _real_extract(self, url):
         video_id = self._match_id(url)
 
@@ -981,6 +1001,32 @@ class FacebookReelIE(InfoExtractor):
         video_id = self._match_id(url)
         return self.url_result(
             f'https://m.facebook.com/watch/?v={video_id}&_rdr', FacebookIE, video_id)
+
+
+class FacebookShareIE(InfoExtractor):
+    _VALID_URL = r'https?://(?:[\w-]+\.)?facebook\.com/share/(?:r|v)/(?P<id>[\w-]+)'
+    IE_NAME = 'facebook:share'
+    _TESTS = [{
+        'url': 'https://www.facebook.com/share/r/1AbCdEfGhI/',
+        'only_matching': True,
+    }, {
+        'url': 'https://www.facebook.com/share/v/1AbCdEfGhI/?mibextid=wwXIfr',
+        'only_matching': True,
+    }]
+
+    def _real_extract(self, url):
+        share_id = self._match_id(url)
+        webpage, urlh = self._download_webpage_handle(url, share_id, 'Resolving share link')
+        # Share links redirect to the reel or video page; otherwise the page may name it
+        for target in (urlh.url, self._og_search_url(webpage, default=None),
+                       self._html_search_regex(
+                           r'<link[^>]+rel=["\']canonical["\'][^>]+href=(["\'])(?P<url>[^"\']+)\1',
+                           webpage, 'canonical url', default=None, group='url')):
+            if target and (FacebookReelIE.suitable(target) or FacebookIE.suitable(target)):
+                return self.url_result(target)
+        if FacebookIE._is_login_wall(webpage) or '/login' in urlh.url:
+            FacebookIE._raise_login_wall(self)
+        raise ExtractorError('The share link did not lead to a video', expected=True)
 
 
 class FacebookAdsIE(InfoExtractor):
