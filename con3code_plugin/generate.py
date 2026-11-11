@@ -61,6 +61,25 @@ class Source:
         start = (node.decorator_list[0] if node.decorator_list else node).lineno - 1
         return '\n'.join(self.text.splitlines()[start:node.end_lineno])
 
+    def method(self, class_name, method_name):
+        """Source of one method of a class, dedented."""
+        node = next(
+            n for n in self.classes[class_name].body
+            if isinstance(n, ast.FunctionDef) and n.name == method_name)
+        start = (n.decorator_list[0] if (n := node).decorator_list else node).lineno - 1
+        return textwrap.dedent('\n'.join(self.text.splitlines()[start:node.end_lineno]))
+
+    def module_names_used(self, code):
+        """Module-level functions/constants of the source module that `code` uses."""
+        defined = set()
+        for node in self.tree.body:
+            if isinstance(node, ast.FunctionDef | ast.ClassDef):
+                defined.add(node.name)
+            elif isinstance(node, ast.Assign):
+                defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        used = {n.id for n in ast.walk(ast.parse(code)) if isinstance(n, ast.Name)}
+        return sorted(used & defined)
+
     def valid_urls(self, name):
         for stmt in self.classes[name].body:
             if isinstance(stmt, ast.Assign) and any(
@@ -142,9 +161,27 @@ __all__ = {extractors!r}
 '''
 
 
+def gen_instagram():
+    src = Source('instagram')
+    # Only InstagramIE needs it: InstagramStoryIE already skips items without formats
+    method = src.method('InstagramBaseIE', '_extract_product')
+    helpers = ', '.join(src.module_names_used(method))
+    return f'''{header(src)}
+{src.imports()}
+
+import yt_dlp.extractor.instagram as _upstream
+from yt_dlp.extractor.instagram import {helpers}
+
+__all__ = []
+
+
+{override('InstagramIE', [method])}'''
+
+
 GENERATORS = {
     'con3code_radiko.py': gen_radiko,
     'con3code_nhk.py': gen_nhk,
+    'con3code_instagram.py': gen_instagram,
 }
 
 

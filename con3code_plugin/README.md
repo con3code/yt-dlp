@@ -13,7 +13,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 `yt-dlp -v` lists the loaded plugins:
 
 ```
-[debug] Extractor Plugins: NhkEduSchoolWatchIE, NhkNewsWebIE, RadikoShareIE, con3code (RadikoIE), con3code (RadikoRadioIE)
+[debug] Extractor Plugins: NhkEduSchoolWatchIE, NhkNewsWebIE, RadikoShareIE, con3code (InstagramIE), con3code (RadikoIE), con3code (RadikoRadioIE)
 ```
 
 ## What it contains
@@ -22,6 +22,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 |---|---|
 | NHK for School new site (`edu.web.nhk/school/watch/bangumi/`, old `bangumi.cgi`) | new extractor `NhkEduSchoolWatchIE` |
 | NHK ONE news articles with video (`news.web.nhk/newsweb/na/...`) | new extractor `NhkNewsWebIE` |
+| Instagram: skip photos in posts that mix photos and videos | override of `InstagramIE` |
 | radiko premium (area-free) login, `--cookies` and `--username/--password` | overrides of `RadikoIE` and `RadikoRadioIE` |
 | radiko share links (`radiko.jp/share/?sid=&t=`) | new extractor `RadikoShareIE`, hands the URL to `RadikoIE` |
 
@@ -30,7 +31,7 @@ extractors, where an override cannot change which URLs an extractor matches.
 
 ## Regenerate after changing the fork
 
-The fork's `yt_dlp/extractor/radiko.py` and `nhk.py` are the only source.
+The fork's `yt_dlp/extractor/radiko.py`, `nhk.py` and `instagram.py` are the only source.
 Do not edit the files under `plugins/` by hand.
 
 ```shell
@@ -45,5 +46,5 @@ python con3code_plugin/generate.py --check  # exit 1 if they are out of date
 - The plugin code is copied from a fork based on yt-dlp 2026.10.26 and is
   tested with that version. On older versions parts of it fail
   (e.g. 2024.10.22: NHK fails with a `urljoin()` error).
-- With the plugin, the radiko extractor name becomes `Radiko+con3code`;
-  the extractor key stays `Radiko`.
+- With the plugin, overridden extractor names get `+con3code`
+  (`Radiko+con3code`, `Instagram+con3code`); the extractor keys stay the same.
