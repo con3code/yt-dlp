@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import random
 import re
 import urllib.parse
@@ -12,6 +13,7 @@ from ..utils import (
     try_call,
     unified_timestamp,
     update_url_query,
+    urlencode_postdata,
 )
 from ..utils.traversal import traverse_obj
 
@@ -37,6 +39,49 @@ class RadikoBaseIE(InfoExtractor):
         'https://c-radiko.smartstream.ne.jp',
     )
 
+    _NETRC_MACHINE = 'radiko'
+    _SESSION = None
+    _MEMBER_INFO = None
+
+    def _perform_login(self, username, password):
+        login = self._download_json(
+            'https://radiko.jp/ap/member/webapi/member/login', None, 'Logging in',
+            data=urlencode_postdata({'mail': username, 'pass': password}),
+            expected_status=(400, 401))
+        session = traverse_obj(login, ('radiko_session', {str}))
+        if not session:
+            raise ExtractorError(
+                'Unable to log in: {}'.format(traverse_obj(login, ('error_message', {str})) or 'unknown error'),
+                expected=True)
+        RadikoBaseIE._SESSION = session
+        # The web player reads the session from this cookie
+        self._set_cookie('radiko.jp', 'radiko_session', session)
+
+    def _get_session(self):
+        # Set by --username/--password, or a logged-in browser cookie (--cookies)
+        return RadikoBaseIE._SESSION or try_call(
+            lambda: self._get_cookies('https://radiko.jp/')['radiko_session'].value) or None
+
+    def _is_areafree_member(self):
+        if not self._get_session():
+            return False
+        if RadikoBaseIE._MEMBER_INFO is None:
+            RadikoBaseIE._MEMBER_INFO = self._download_json(
+                'https://radiko.jp/ap/member/webapi/v2/member/login/check', None,
+                'Checking membership', fatal=False, expected_status=400) or {}
+            if str(RadikoBaseIE._MEMBER_INFO.get('status')) != '200':
+                self.report_warning(
+                    'radiko login session is invalid or expired; continuing as a non-member')
+        info = RadikoBaseIE._MEMBER_INFO
+        return str(info.get('status')) == '200' and bool(info.get('areafree'))
+
+    def _auth_cache_key(self):
+        session = self._get_session()
+        if not session:
+            return 'auth_data'
+        # Keep member tokens apart from free ones, without storing the session itself
+        return f'auth_data_{hashlib.sha256(session.encode()).hexdigest()[:16]}'
+
     def _negotiate_token(self):
         _, auth1_handle = self._download_webpage_handle(
             'https://radiko.jp/v2/api/auth1', None, 'Downloading authentication page',
@@ -54,24 +99,32 @@ class RadikoBaseIE(InfoExtractor):
         raw_partial_key = self._extract_full_key()[ko:ko + kl]
         partial_key = base64.b64encode(raw_partial_key).decode()
 
+        headers = {
+            'x-radiko-device': 'pc',
+            'x-radiko-user': 'dummy_user',
+            'x-radiko-authtoken': auth_token,
+            'x-radiko-partialkey': partial_key,
+        }
+        if session := self._get_session():
+            # Same as the web player: the member session goes in this header
+            headers.update({
+                'X-Radiko-Session': session,
+                'X-Radiko-Connection': 'wifi',
+            })
+
         area_id = self._download_webpage(
             'https://radiko.jp/v2/api/auth2', None, 'Authenticating',
-            headers={
-                'x-radiko-device': 'pc',
-                'x-radiko-user': 'dummy_user',
-                'x-radiko-authtoken': auth_token,
-                'x-radiko-partialkey': partial_key,
-            }).split(',')[0]
+            headers=headers).split(',')[0]
 
         if area_id == 'OUT':
             self.raise_geo_restricted(countries=['JP'])
 
         auth_data = (auth_token, area_id)
-        self.cache.store('radiko', 'auth_data', auth_data)
+        self.cache.store('radiko', self._auth_cache_key(), auth_data)
         return auth_data
 
     def _auth_client(self):
-        cachedata = self.cache.load('radiko', 'auth_data')
+        cachedata = self.cache.load('radiko', self._auth_cache_key())
         if cachedata is not None:
             response = self._download_webpage(
                 'https://radiko.jp/v2/api/auth_check', None, 'Checking cached token', expected_status=401,
@@ -79,6 +132,14 @@ class RadikoBaseIE(InfoExtractor):
             if response == 'OK':
                 return cachedata
         return self._negotiate_token()
+
+    def _is_station_in_area(self, station, area_id):
+        station_list = self._download_xml(
+            f'https://radiko.jp/v3/station/list/{area_id}.xml', station,
+            f'Downloading station list for {area_id}', fatal=False)
+        if station_list is None:
+            return True
+        return station in [e.text for e in station_list.findall('.//station/id')]
 
     def _extract_full_key(self):
         if self._FULL_KEY:
@@ -127,7 +188,15 @@ class RadikoBaseIE(InfoExtractor):
 
         timefree_int = 0 if is_onair else 1
 
-        for element in m3u8_playlist_data.findall(f'.//url[@timefree="{timefree_int}"]/playlist_create_url'):
+        # Area-free members listening outside their area use the areafree="1" endpoints with type=c,
+        # the same as the web player. Otherwise, keep the original behavior.
+        url_filter = f'@timefree="{timefree_int}"'
+        connection_type = 'b'
+        if self._is_areafree_member() and not self._is_station_in_area(station, area_id):
+            url_filter += '][@areafree="1"'
+            connection_type = 'c'
+
+        for element in m3u8_playlist_data.findall(f'.//url[{url_filter}]/playlist_create_url'):
             pcu = element.text
             if pcu in found:
                 continue
@@ -137,7 +206,7 @@ class RadikoBaseIE(InfoExtractor):
                 **query,
                 'l': '15',
                 'lsid': ''.join(random.choices('0123456789abcdef', k=32)),
-                'type': 'b',
+                'type': connection_type,
             })
 
             time_to_skip = None if is_onair else cursor - ft
