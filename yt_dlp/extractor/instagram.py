@@ -206,6 +206,17 @@ class InstagramBaseIE(InfoExtractor):
         }
 
         if carousel_media := traverse_obj(product_info, ('carousel_media', ..., {dict})):
+            # Posts can mix photos and videos; photos have no formats, so skip them
+            # instead of failing with "No video formats found" for each one
+            video_media = [m for m in carousel_media if m.get('video_versions') or m.get('video_dash_manifest')]
+            if len(video_media) < len(carousel_media):
+                self.to_screen(
+                    f'{info_dict.get("id")}: Skipping {len(carousel_media) - len(video_media)} '
+                    f'photo(s) of {len(carousel_media)} items in this post')
+            if not video_media:
+                raise ExtractorError('This post has only photos and no video', expected=True)
+            carousel_media = video_media
+
             comments = None
             if get_comments and self.get_param('getcomments'):
                 comments = self._get_comments(info_dict.get('id'))
