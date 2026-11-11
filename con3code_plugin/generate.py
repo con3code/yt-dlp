@@ -128,13 +128,17 @@ class RadikoShareIE(InfoExtractor):
 
 def gen_nhk():
     src = Source('nhk')
+    # The base class is copied too, but only the extractors are listed in __all__
+    # so that yt-dlp does not register the base class as an extractor
+    extractors = ['NhkEduSchoolWatchIE', 'NhkNewsWebIE']
+    classes = '\n\n\n'.join(src.class_source(name) for name in ['NhkWebBaseIE', *extractors])
     return f'''{header(src)}
 {src.imports()}
 
-__all__ = ['NhkEduSchoolWatchIE']
+__all__ = {extractors!r}
 
 
-{src.class_source('NhkEduSchoolWatchIE')}
+{classes}
 '''
 
 

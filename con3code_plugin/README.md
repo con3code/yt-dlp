@@ -13,7 +13,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 `yt-dlp -v` lists the loaded plugins:
 
 ```
-[debug] Extractor Plugins: NhkEduSchoolWatchIE, RadikoShareIE, con3code (RadikoIE), con3code (RadikoRadioIE)
+[debug] Extractor Plugins: NhkEduSchoolWatchIE, NhkNewsWebIE, RadikoShareIE, con3code (RadikoIE), con3code (RadikoRadioIE)
 ```
 
 ## What it contains
@@ -21,6 +21,7 @@ Pass the `plugins` folder itself, not `yt_dlp_plugins` inside it.
 | Fork change | In the plugin as |
 |---|---|
 | NHK for School new site (`edu.web.nhk/school/watch/bangumi/`, old `bangumi.cgi`) | new extractor `NhkEduSchoolWatchIE` |
+| NHK ONE news articles with video (`news.web.nhk/newsweb/na/...`) | new extractor `NhkNewsWebIE` |
 | radiko premium (area-free) login, `--cookies` and `--username/--password` | overrides of `RadikoIE` and `RadikoRadioIE` |
 | radiko share links (`radiko.jp/share/?sid=&t=`) | new extractor `RadikoShareIE`, hands the URL to `RadikoIE` |
 
