@@ -53,26 +53,26 @@ class RadikoBaseIE(InfoExtractor):
             raise ExtractorError(
                 'Unable to log in: {}'.format(traverse_obj(login, ('error_message', {str})) or 'unknown error'),
                 expected=True)
-        RadikoBaseIE._SESSION = session
+        self._SESSION = session
         # The web player reads the session from this cookie
         self._set_cookie('radiko.jp', 'radiko_session', session)
 
     def _get_session(self):
         # Set by --username/--password, or a logged-in browser cookie (--cookies)
-        return RadikoBaseIE._SESSION or try_call(
+        return self._SESSION or try_call(
             lambda: self._get_cookies('https://radiko.jp/')['radiko_session'].value) or None
 
     def _is_areafree_member(self):
         if not self._get_session():
             return False
-        if RadikoBaseIE._MEMBER_INFO is None:
-            RadikoBaseIE._MEMBER_INFO = self._download_json(
+        if self._MEMBER_INFO is None:
+            self._MEMBER_INFO = self._download_json(
                 'https://radiko.jp/ap/member/webapi/v2/member/login/check', None,
                 'Checking membership', fatal=False, expected_status=400) or {}
-            if str(RadikoBaseIE._MEMBER_INFO.get('status')) != '200':
+            if str(self._MEMBER_INFO.get('status')) != '200':
                 self.report_warning(
                     'radiko login session is invalid or expired; continuing as a non-member')
-        info = RadikoBaseIE._MEMBER_INFO
+        info = self._MEMBER_INFO
         return str(info.get('status')) == '200' and bool(info.get('areafree'))
 
     def _auth_cache_key(self):
