@@ -163,9 +163,10 @@ __all__ = {extractors!r}
 
 def gen_instagram():
     src = Source('instagram')
-    # Only InstagramIE needs it: InstagramStoryIE already skips items without formats
-    method = src.method('InstagramBaseIE', '_extract_product')
-    helpers = ', '.join(src.module_names_used(method))
+    # Only InstagramIE needs it: InstagramStoryIE already skips items without formats.
+    # _real_extract is copied for img_index=; the rest of InstagramIE comes from upstream.
+    methods = [src.method('InstagramBaseIE', '_extract_product'), src.method('InstagramIE', '_real_extract')]
+    helpers = ', '.join(src.module_names_used('\n'.join(methods)))
     return f'''{header(src)}
 {src.imports()}
 
@@ -175,7 +176,7 @@ from yt_dlp.extractor.instagram import {helpers}
 __all__ = []
 
 
-{override('InstagramIE', [method])}'''
+{override('InstagramIE', methods)}'''
 
 
 GENERATORS = {
