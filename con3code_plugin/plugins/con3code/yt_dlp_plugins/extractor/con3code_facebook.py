@@ -27,10 +27,11 @@ class FacebookIE(_upstream.FacebookIE, plugin_name='con3code'):
             'm_login_email', 'caa_login_form'))
 
     def _page_headers(self):
-        # Phone User-Agents get the mobile site, whose pages have no video data
-        # (it is loaded by script later), so ask for the desktop site instead
+        # Only desktop Chrome-like User-Agents get pages with video data. Phone UAs get
+        # the mobile site, where the video is loaded by script later; Safari gets a
+        # "Redirecting..." page. So use the default desktop Chrome UA for other UAs
         user_agent = traverse_obj(self.get_param('http_headers'), 'User-Agent') or ''
-        if re.search(r'\b(?:Mobile|iPhone|iPod|Android)\b', user_agent):
+        if 'Chrome/' not in user_agent or re.search(r'\b(?:Mobile|iPhone|iPod|Android)\b', user_agent):
             return {'User-Agent': std_headers['User-Agent']}
         return {}
 
