@@ -556,6 +556,7 @@ from .facebook import (
     FacebookPluginsVideoIE,
     FacebookRedirectURLIE,
     FacebookReelIE,
+    FacebookShareIE,
 )
 from .fancode import (
     FancodeLiveIE,

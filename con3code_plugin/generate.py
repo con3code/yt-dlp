@@ -201,11 +201,33 @@ __all__ = ['ThreadsIE', 'ThreadsShareIE']
 '''
 
 
+def gen_facebook():
+    src = Source('facebook')
+    # _extract_from_url is copied for the reel caption and the signed-out page check;
+    # FacebookReelIE hands reels to FacebookIE, so it picks up this override
+    methods = [src.method('FacebookIE', name) for name in ('_is_login_wall', '_raise_login_wall', '_extract_from_url')]
+    helpers = ['FacebookReelIE', *src.module_names_used('\n'.join(methods))]
+    return f'''{header(src)}
+{src.imports()}
+
+import yt_dlp.extractor.facebook as _upstream
+from yt_dlp.extractor.facebook import {', '.join(helpers)}
+
+__all__ = ['FacebookShareIE']
+
+
+{override('FacebookIE', methods)}
+
+{src.class_source('FacebookShareIE')}
+'''
+
+
 GENERATORS = {
     'con3code_radiko.py': gen_radiko,
     'con3code_nhk.py': gen_nhk,
     'con3code_instagram.py': gen_instagram,
     'con3code_threads.py': gen_threads,
+    'con3code_facebook.py': gen_facebook,
 }
 
 
